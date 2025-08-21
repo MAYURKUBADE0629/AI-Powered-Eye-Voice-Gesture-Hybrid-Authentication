@@ -1,2 +1,95 @@
 # EYE-RECGNITION-MODEL
 This project implements an Eye-Based Biometric Recognition System using OpenCV, TensorFlow/Keras, and Haar Cascades. It allows you to collect eye image datasets, train a deep learning model, and recognize individuals based on their eyes.
+import cv2
+import os
+person_name = input("Enter your name: ").strip()
+save_dir = f"dataset/{person_name}"
+os.makedirs(save_dir, exist_ok=True)
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+cap = cv2.VideoCapture(0)
+count = 0
+print(f"📷 Collecting eye images for {person_name}. Press 'q' to stop.")
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    eyes = eye_cascade.detectMultiScale(gray, 1.3, 5)
+    for (x, y, w, h) in eyes:
+        eye = frame[y:y+h, x:x+w]
+        eye = cv2.resize(eye, (64, 64))
+        cv2.imwrite(f"{save_dir}/eye_{count}.jpg", eye)
+        count += 1
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.putText(frame, f"{person_name} #{count}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.6, (0,255,0), 2)
+    cv2.imshow("Eye Dataset Collector", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q') or count >= 200:
+        break
+cap.release()
+cv2.destroyAllWindows()
+print(f"✅ Saved {count} eye images in {save_dir}")
+
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+datagen = ImageDataGenerator(rescale=1./255)
+train_data = datagen.flow_from_directory(
+    "dataset",
+    target_size=(64, 64),
+    color_mode="grayscale",
+    batch_size=32,
+    class_mode="categorical"
+)
+model = models.Sequential([
+    layers.Conv2D(32, (3,3), activation='relu', input_shape=(64,64,1)),
+    layers.MaxPooling2D(2,2),
+    layers.Conv2D(64, (3,3), activation='relu'),
+    layers.MaxPooling2D(2,2),
+    layers.Flatten(),
+    layers.Dense(128, activation='relu'),
+    layers.Dense(train_data.num_classes, activation='softmax')
+])
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.fit(train_data, epochs=10)
+model.save("eye_model.h5")
+print("✅ Model saved as eye_model.h5")
+
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+import os
+model = load_model("eye_model.h5")
+dataset_dir = "dataset"
+labels = sorted(os.listdir(dataset_dir))
+print("✅ Loaded Labels:", labels)
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+cap = cv2.VideoCapture(0)
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    eyes = eye_cascade.detectMultiScale(gray, 1.3, 5)
+    for (x, y, w, h) in eyes:
+        eye = gray[y:y+h, x:x+w]
+        eye_resized = cv2.resize(eye, (64, 64))
+        eye_resized = eye_resized.astype("float32") / 255.0
+        eye_resized = np.expand_dims(eye_resized, axis=-1)  #(64,64,1) size should be (64,64,1)
+        eye_resized = np.expand_dims(eye_resized, axis=0)   #(1,64,64,1) size should be (1,64,64,1)
+        pred = model.predict(eye_resized, verbose=0)
+        label = labels[np.argmax(pred)]
+        confidence = np.max(pred) * 100
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.putText(frame, f"{label} ({confidence:.1f}%)", (x, y-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        eye_display = cv2.resize(eye, (200, 200))
+        cv2.imshow(f"{label}'s Eye", eye_display)
+    cv2.imshow("Eye Recognition", frame)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+cap.release()
+cv2.destroyAllWindows()
+
+
